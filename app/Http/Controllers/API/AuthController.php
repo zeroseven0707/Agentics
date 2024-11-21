@@ -20,6 +20,7 @@ class AuthController extends Controller
     ]);
 
     $user = User::create([
+        'login_type' => 'common',
         'name' => $validated['name'],
         'email' => $validated['email'],
         'password' => Hash::make($validated['password']),
@@ -28,19 +29,65 @@ class AuthController extends Controller
     return response()->json(['message' => 'User registered successfully'], 201);
 }
 public function login(Request $request)
-{
-    $credentials = $request->only('email', 'password');
+    {
+        if ($request->has('uid')) {
+            // Login via Google
+            $request->validate([
+                'email' => 'required|email',
+                'name' => 'required|string',
+                'uid' => 'required|string',
+                'photo_url' => 'required|string',
+            ]);
 
-    if (!$token = JWTAuth::attempt($credentials)) {
-        return response()->json(['error' => 'Invalid credentials'], 401);
+            $email = $request->email;
+            $name = $request->name;
+            $uid = $request->uid;
+            $photo_url = $request->photo_url;
+
+            // Cari pengguna berdasarkan email
+            $user = User::where('email', $email)->first();
+
+            if (!$user) {
+                // Jika pengguna belum ada, buat pengguna baru
+                $user = User::create([
+                    'name' => $name,
+                    'login_type' => "google",
+                    'email' => $email,
+                    'uid' => $uid,
+                    'photo_url' => $photo_url,
+                    'password' => bcrypt(uniqid()),
+                ]);
+            } else {
+                // Update google_id jika belum ada
+                if (!$user->google_id) {
+                    $user->update(['uid' => $uid]);
+                }
+            }
+
+            // Generate JWT token
+            $token = JWTAuth::fromUser($user);
+
+            return response()->json([
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'expires_in' => auth('api')->factory()->getTTL() * 60,
+                'user' => $user,
+            ]);
+        } else {
+            // Login via email dan password
+            $credentials = $request->only('email', 'password');
+
+            if (!$token = JWTAuth::attempt($credentials)) {
+                return response()->json(['error' => 'Invalid credentials'], 401);
+            }
+
+            return response()->json([
+                'access_token' => $token,
+                'token_type' => 'Bearer',
+                'expires_in' => auth('api')->factory()->getTTL() * 60,
+            ]);
+        }
     }
-
-    return response()->json([
-        'access_token' => $token,
-        'token_type' => 'Bearer',
-        'expires_in' => auth('api')->factory()->getTTL() * 60,
-    ]);
-}
 public function logout()
 {
     auth()->logout();
